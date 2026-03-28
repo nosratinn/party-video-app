@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Leave a Video Message!</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- SCREEN 1: Welcome / Home -->
+    <div id="screen-home" class="screen active">
+        <div class="screen-content">
+            <div class="emoji-large">🎉</div>
+            <h1>Leave Us a<br>Video Message!</h1>
+            <p class="subtitle">Press <strong>START</strong> and say hello!</p>
+            <button id="btn-start" class="btn btn-primary btn-large">START</button>
+        </div>
+    </div>
+
+    <!-- SCREEN 2: Countdown before recording -->
+    <div id="screen-countdown" class="screen">
+        <div class="screen-content">
+            <p class="countdown-label">Get Ready!</p>
+            <div id="countdown-number" class="countdown-display">7</div>
+            <div class="video-preview-container">
+                <video id="video-preview-countdown" class="video-preview" autoplay playsinline muted></video>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN 3: Recording -->
+    <div id="screen-recording" class="screen">
+        <div class="screen-content recording-layout">
+            <div class="recording-header">
+                <div class="recording-indicator">
+                    <span class="red-dot"></span>
+                    <span class="recording-text">RECORDING</span>
+                </div>
+                <div id="timer-display" class="timer-display">0:00</div>
+            </div>
+            <div class="video-preview-container recording-preview">
+                <video id="video-preview-recording" class="video-preview" autoplay playsinline muted></video>
+                <!-- Final countdown overlay -->
+                <div id="final-countdown-overlay" class="final-countdown-overlay hidden">
+                    <div id="final-countdown-number" class="final-countdown-number">10</div>
+                </div>
+            </div>
+            <div class="recording-footer">
+                <div id="progress-bar-container" class="progress-bar-container">
+                    <div id="progress-bar" class="progress-bar"></div>
+                </div>
+                <button id="btn-finish" class="btn btn-danger btn-large">FINISH</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN 4: Review / Save or Retry -->
+    <div id="screen-review" class="screen">
+        <div class="screen-content">
+            <h2>Your Video Message</h2>
+            <div class="video-preview-container review-video-container">
+                <video id="video-playback" class="video-preview" controls playsinline></video>
+            </div>
+            <div class="review-buttons">
+                <button id="btn-save" class="btn btn-success btn-large">📤 Send Video</button>
+                <button id="btn-retry" class="btn btn-secondary btn-large">🔄 Try Again</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN 5: Thank You -->
+    <div id="screen-thankyou" class="screen">
+        <div class="screen-content">
+            <div class="emoji-large">🎉</div>
+            <h1>Thank You!</h1>
+            <p class="subtitle">Your message has been saved!</p>
+            <div class="emoji-row">🥳 ❤️ 🎊</div>
+        </div>
+    </div>
+
+    <!-- Loading/Saving Overlay -->
+    <div id="overlay-saving" class="overlay hidden">
+        <div class="overlay-content">
+            <div class="spinner"></div>
+            <p>Saving your video...</p>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
