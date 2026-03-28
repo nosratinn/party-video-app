@@ -4,459 +4,297 @@
     // ===========================================
     // CONFIGURATION
     // ===========================================
-    const CONFIG = {
-        countdownSeconds: 7,
-        maxRecordingSeconds: 60,
-        finalCountdownStart: 50,   // seconds elapsed when final countdown begins
-        thankYouDuration: 8000,     // ms before returning to home
-        saveMethod: 'local'         // 'local' or 'gdrive'
+    var CONFIG = {
+        thankYouDuration: 8000,  // ms before returning to home
+        saveMethod: 'local',     // 'local' or 'gdrive'
+        // Google Drive settings (only if saveMethod is 'gdrive')
+        gdrive: {
+            // OPTION 1: Google Apps Script Web App (recommended - see README)
+            scriptUrl: 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE',
+            // OPTION 2: Direct Drive API (requires OAuth)
+            apiUrl: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+            accessToken: 'YOUR_ACCESS_TOKEN_HERE',
+            folderId: 'YOUR_FOLDER_ID_HERE'
+        }
     };
 
     // ===========================================
     // STATE
     // ===========================================
-    let mediaStream = null;
-    let mediaRecorder = null;
-    let recordedChunks = [];
-    let recordingStartTime = null;
-    let timerInterval = null;
-    let countdownInterval = null;
-    let finalCountdownInterval = null;
-    let recordedBlob = null;
-    let videoCounter = 0;
+    var capturedFile = null;
+    var videoObjectUrl = null;
+    var videoCounter = 0;
 
     // ===========================================
     // DOM REFERENCES
     // ===========================================
-    const screens = {
+    var screens = {
         home: document.getElementById('screen-home'),
-        countdown: document.getElementById('screen-countdown'),
-        recording: document.getElementById('screen-recording'),
         review: document.getElementById('screen-review'),
-        thankyou: document.getElementById('screen-thankyou')
+        saving: document.getElementById('screen-saving'),
+        thankyou: document.getElementById('screen-thankyou'),
+        error: document.getElementById('screen-error')
     };
 
-    const elements = {
-        btnStart: document.getElementById('btn-start'),
-        btnFinish: document.getElementById('btn-finish'),
-        btnSave: document.getElementById('btn-save'),
-        btnRetry: document.getElementById('btn-retry'),
-        countdownNumber: document.getElementById('countdown-number'),
-        videoPreviewCountdown: document.getElementById('video-preview-countdown'),
-        videoPreviewRecording: document.getElementById('video-preview-recording'),
-        videoPlayback: document.getElementById('video-playback'),
-        timerDisplay: document.getElementById('timer-display'),
-        progressBar: document.getElementById('progress-bar'),
-        finalCountdownOverlay: document.getElementById('final-countdown-overlay'),
-        finalCountdownNumber: document.getElementById('final-countdown-number'),
-        overlaySaving: document.getElementById('overlay-saving')
-    };
+    var videoCapture = document.getElementById('video-capture');
+    var videoPlayback = document.getElementById('video-playback');
+    var btnSave = document.getElementById('btn-save');
+    var btnRetry = document.getElementById('btn-retry');
+    var btnErrorHome = document.getElementById('btn-error-home');
+    var errorMessage = document.getElementById('error-message');
 
     // ===========================================
     // SCREEN MANAGEMENT
     // ===========================================
-    function showScreen(screenName) {
-        Object.keys(screens).forEach(key => {
-            screens[key].classList.remove('active');
-        });
-        screens[screenName].classList.add('active');
-    }
-
-    // ===========================================
-    // CAMERA
-    // ===========================================
-    async function startCamera() {
-        try {
-            // Stop any existing stream
-            stopCamera();
-
-            const constraints = {
-                video: {
-                    facingMode: 'user',
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                },
-                audio: true
-            };
-
-            mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-            elements.videoPreviewCountdown.srcObject = mediaStream;
-            elements.videoPreviewRecording.srcObject = mediaStream;
-
-            return true;
-        } catch (err) {
-            console.error('Camera access error:', err);
-            alert('Camera access is needed to record a video message. Please allow camera access and try again.');
-            return false;
-        }
-    }
-
-    function stopCamera() {
-        if (mediaStream) {
-            mediaStream.getTracks().forEach(track => track.stop());
-            mediaStream = null;
-        }
-        elements.videoPreviewCountdown.srcObject = null;
-        elements.videoPreviewRecording.srcObject = null;
-    }
-
-    // ===========================================
-    // COUNTDOWN (Before Recording)
-    // ===========================================
-    function startCountdown() {
-        let remaining = CONFIG.countdownSeconds;
-        elements.countdownNumber.textContent = remaining;
-
-        showScreen('countdown');
-
-        countdownInterval = setInterval(() => {
-            remaining--;
-            elements.countdownNumber.textContent = remaining;
-
-            if (remaining <= 0) {
-                clearInterval(countdownInterval);
-                countdownInterval = null;
-                startRecording();
-            }
-        }, 1000);
-    }
-
-    // ===========================================
-    // RECORDING
-    // ===========================================
-    function startRecording() {
-        recordedChunks = [];
-        recordedBlob = null;
-
-        // Determine supported mime type
-        let mimeType = '';
-        const types = [
-            'video/mp4',
-            'video/webm;codecs=vp9,opus',
-            'video/webm;codecs=vp8,opus',
-            'video/webm'
-        ];
-        for (const type of types) {
-            if (MediaRecorder.isTypeSupported(type)) {
-                mimeType = type;
-                break;
+    function showScreen(name) {
+        var key;
+        for (key in screens) {
+            if (screens.hasOwnProperty(key)) {
+                screens[key].classList.remove('active');
             }
         }
-
-        const options = mimeType ? { mimeType } : {};
-
-        try {
-            mediaRecorder = new MediaRecorder(mediaStream, options);
-        } catch (e) {
-            console.warn('MediaRecorder creation with options failed, trying default', e);
-            mediaRecorder = new MediaRecorder(mediaStream);
-        }
-
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data && event.data.size > 0) {
-                recordedChunks.push(event.data);
-            }
-        };
-
-        mediaRecorder.onstop = () => {
-            const type = mediaRecorder.mimeType || 'video/webm';
-            recordedBlob = new Blob(recordedChunks, { type });
-            showReviewScreen();
-        };
-
-        mediaRecorder.start(1000); // collect data every second
-        recordingStartTime = Date.now();
-
-        // Reset UI
-        elements.timerDisplay.textContent = '0:00';
-        elements.progressBar.style.width = '0%';
-        elements.progressBar.classList.remove('warning');
-        elements.finalCountdownOverlay.classList.add('hidden');
-
-        showScreen('recording');
-        startTimer();
-    }
-
-    function stopRecording() {
-        if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-        }
-        if (finalCountdownInterval) {
-            clearInterval(finalCountdownInterval);
-            finalCountdownInterval = null;
-        }
-
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-        }
+        screens[name].classList.add('active');
     }
 
     // ===========================================
-    // TIMER & PROGRESS
+    // CLEANUP
     // ===========================================
-    function startTimer() {
-        timerInterval = setInterval(() => {
-            const elapsed = (Date.now() - recordingStartTime) / 1000;
-            updateTimerDisplay(elapsed);
-            updateProgressBar(elapsed);
-
-            // Start final countdown at 50 seconds
-            if (elapsed >= CONFIG.finalCountdownStart && !finalCountdownInterval) {
-                startFinalCountdown();
-            }
-
-            // Auto-stop at 60 seconds
-            if (elapsed >= CONFIG.maxRecordingSeconds) {
-                stopRecording();
-            }
-        }, 250);
-    }
-
-    function updateTimerDisplay(elapsedSeconds) {
-        const secs = Math.floor(elapsedSeconds);
-        const mins = Math.floor(secs / 60);
-        const remainSecs = secs % 60;
-        elements.timerDisplay.textContent = `${mins}:${remainSecs.toString().padStart(2, '0')}`;
-    }
-
-    function updateProgressBar(elapsedSeconds) {
-        const percent = Math.min((elapsedSeconds / CONFIG.maxRecordingSeconds) * 100, 100);
-        elements.progressBar.style.width = percent + '%';
-
-        if (elapsedSeconds >= CONFIG.finalCountdownStart) {
-            elements.progressBar.classList.add('warning');
+    function cleanup() {
+        if (videoObjectUrl) {
+            URL.revokeObjectURL(videoObjectUrl);
+            videoObjectUrl = null;
         }
+        videoPlayback.removeAttribute('src');
+        videoPlayback.load();
+        capturedFile = null;
     }
 
     // ===========================================
-    // FINAL COUNTDOWN (last 10 seconds)
+    // RESET TO HOME
     // ===========================================
-    function startFinalCountdown() {
-        elements.finalCountdownOverlay.classList.remove('hidden');
-        let remaining = CONFIG.maxRecordingSeconds - CONFIG.finalCountdownStart;
-
-        const updateDisplay = () => {
-            const elapsed = (Date.now() - recordingStartTime) / 1000;
-            remaining = Math.ceil(CONFIG.maxRecordingSeconds - elapsed);
-            if (remaining < 0) remaining = 0;
-            elements.finalCountdownNumber.textContent = remaining;
-        };
-
-        updateDisplay();
-        finalCountdownInterval = setInterval(updateDisplay, 250);
+    function resetToHome() {
+        cleanup();
+        // Reset the file input so the same file can be re-selected
+        videoCapture.value = '';
+        showScreen('home');
     }
 
     // ===========================================
-    // REVIEW SCREEN
+    // HANDLE VIDEO CAPTURE
+    // When the user finishes recording with the native camera,
+    // iOS returns the video file to our input element.
     // ===========================================
-    function showReviewScreen() {
-        if (recordedBlob) {
-            const url = URL.createObjectURL(recordedBlob);
-            elements.videoPlayback.src = url;
-            elements.videoPlayback.load();
+    function handleVideoCapture(event) {
+        var file = event.target.files && event.target.files[0];
+
+        if (!file) {
+            // User cancelled the camera — stay on home screen
+            return;
         }
+
+        // Validate it's a video
+        if (file.type && file.type.indexOf('video') === -1) {
+            showError('That doesn\'t appear to be a video. Please try again.');
+            return;
+        }
+
+        capturedFile = file;
+
+        // Create object URL for playback
+        if (videoObjectUrl) {
+            URL.revokeObjectURL(videoObjectUrl);
+        }
+        videoObjectUrl = URL.createObjectURL(file);
+
+        videoPlayback.src = videoObjectUrl;
+        videoPlayback.load();
+
         showScreen('review');
     }
 
     // ===========================================
     // SAVE VIDEO
     // ===========================================
-    async function saveVideo() {
-        if (!recordedBlob) {
-            alert('No video recorded. Please try again.');
+    function saveVideo() {
+        if (!capturedFile) {
+            showError('No video found. Please try again.');
             return;
         }
 
-        elements.overlaySaving.classList.remove('hidden');
+        showScreen('saving');
 
-        try {
-            if (CONFIG.saveMethod === 'gdrive') {
-                await saveToGoogleDrive(recordedBlob);
-            } else {
-                saveLocally(recordedBlob);
-            }
-
-            elements.overlaySaving.classList.add('hidden');
-            showThankYou();
-        } catch (err) {
-            console.error('Save error:', err);
-            elements.overlaySaving.classList.add('hidden');
-            // Fall back to local save
-            saveLocally(recordedBlob);
-            showThankYou();
+        if (CONFIG.saveMethod === 'gdrive') {
+            saveToGoogleDrive(capturedFile);
+        } else {
+            saveLocally(capturedFile);
         }
     }
 
-    function saveLocally(blob) {
+    // ===========================================
+    // LOCAL SAVE
+    // Uses a download link. On iOS/Safari this will
+    // prompt the user or save to Files.
+    // ===========================================
+    function saveLocally(file) {
         videoCounter++;
-        const timestamp = getTimestamp();
-        const extension = blob.type.includes('mp4') ? 'mp4' : 'webm';
-        const filename = `video_message_${timestamp}.${extension}`;
+        var timestamp = getTimestamp();
+        var extension = getExtension(file);
+        var filename = 'video_message_' + timestamp + '.' + extension;
 
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // Method 1: Try using a download link
+        try {
+            var url = URL.createObjectURL(file);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
 
-        // Revoke after a delay
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-    }
+            setTimeout(function () {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 5000);
+        } catch (e) {
+            // If download doesn't work on this iOS version,
+            // the file is still captured and could be uploaded
+            console.log('Direct download not supported, file is captured in memory.');
+        }
 
-    function getTimestamp() {
-        const now = new Date();
-        return now.getFullYear().toString() +
-            (now.getMonth() + 1).toString().padStart(2, '0') +
-            now.getDate().toString().padStart(2, '0') + '_' +
-            now.getHours().toString().padStart(2, '0') +
-            now.getMinutes().toString().padStart(2, '0') +
-            now.getSeconds().toString().padStart(2, '0');
+        // Show thank you regardless
+        showThankYou();
     }
 
     // ===========================================
-    // GOOGLE DRIVE SAVE (Optional - requires setup)
+    // GOOGLE DRIVE SAVE VIA APPS SCRIPT
+    // This is the recommended approach — no OAuth needed on client
     // ===========================================
-    async function saveToGoogleDrive(blob) {
-        // =====================================================
-        // TO USE GOOGLE DRIVE:
-        // 1. Create a Google Cloud project
-        // 2. Enable the Google Drive API
-        // 3. Create OAuth 2.0 credentials (or use a service account)
-        // 4. Set your API key and folder ID below
-        // 5. Change CONFIG.saveMethod to 'gdrive'
-        // =====================================================
+    function saveToGoogleDrive(file) {
+        var reader = new FileReader();
 
-        const GOOGLE_DRIVE_API = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-        const ACCESS_TOKEN = 'YOUR_ACCESS_TOKEN_HERE'; // Replace with OAuth token
-        const FOLDER_ID = 'YOUR_FOLDER_ID_HERE';       // Replace with Drive folder ID
+        reader.onload = function () {
+            var base64 = reader.result.split(',')[1];
+            var timestamp = getTimestamp();
+            var extension = getExtension(file);
+            var filename = 'video_message_' + timestamp + '.' + extension;
 
-        const timestamp = getTimestamp();
-        const extension = blob.type.includes('mp4') ? 'mp4' : 'webm';
-        const filename = `video_message_${timestamp}.${extension}`;
+            var payload = {
+                filename: filename,
+                mimeType: file.type || 'video/mp4',
+                data: base64
+            };
 
-        const metadata = {
-            name: filename,
-            mimeType: blob.type,
-            parents: [FOLDER_ID]
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', CONFIG.gdrive.scriptUrl, true);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+
+            xhr.onload = function () {
+                if (xhr.status === 200) {
+                    showThankYou();
+                } else {
+                    console.error('Upload failed:', xhr.status, xhr.responseText);
+                    // Fall back to local save
+                    saveLocally(file);
+                }
+            };
+
+            xhr.onerror = function () {
+                console.error('Upload error');
+                // Fall back to local save
+                saveLocally(file);
+            };
+
+            xhr.send(JSON.stringify(payload));
         };
 
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', blob);
+        reader.onerror = function () {
+            console.error('FileReader error');
+            saveLocally(file);
+        };
 
-        const response = await fetch(GOOGLE_DRIVE_API, {
-            method: 'POST',
-            headers: {
-                'Authorization': 'Bearer ' + ACCESS_TOKEN
-            },
-            body: form
-        });
-
-        if (!response.ok) {
-            throw new Error('Google Drive upload failed: ' + response.status);
-        }
-
-        return response.json();
+        reader.readAsDataURL(file);
     }
 
     // ===========================================
     // THANK YOU SCREEN
     // ===========================================
     function showThankYou() {
-        // Stop camera since we're done
-        stopCamera();
-
-        // Clean up playback
-        elements.videoPlayback.src = '';
+        // Pause any playing video
+        try { videoPlayback.pause(); } catch (e) {}
 
         showScreen('thankyou');
 
-        setTimeout(() => {
+        setTimeout(function () {
             resetToHome();
         }, CONFIG.thankYouDuration);
     }
 
     // ===========================================
-    // RESET
+    // ERROR SCREEN
     // ===========================================
-    function resetToHome() {
-        // Clear all intervals
-        if (countdownInterval) {
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-        }
-        if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-        }
-        if (finalCountdownInterval) {
-            clearInterval(finalCountdownInterval);
-            finalCountdownInterval = null;
-        }
+    function showError(msg) {
+        errorMessage.textContent = msg || 'Please try again.';
+        showScreen('error');
+    }
 
-        // Stop recording if active
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
+    // ===========================================
+    // UTILITIES
+    // ===========================================
+    function getTimestamp() {
+        var now = new Date();
+        return now.getFullYear().toString() +
+            pad(now.getMonth() + 1) +
+            pad(now.getDate()) + '_' +
+            pad(now.getHours()) +
+            pad(now.getMinutes()) +
+            pad(now.getSeconds());
+    }
+
+    function pad(n) {
+        return n < 10 ? '0' + n : n.toString();
+    }
+
+    function getExtension(file) {
+        if (file.name) {
+            var parts = file.name.split('.');
+            if (parts.length > 1) {
+                return parts[parts.length - 1].toLowerCase();
+            }
         }
-        mediaRecorder = null;
-
-        // Stop camera
-        stopCamera();
-
-        // Clean up
-        recordedChunks = [];
-        recordedBlob = null;
-        elements.videoPlayback.src = '';
-        elements.finalCountdownOverlay.classList.add('hidden');
-        elements.progressBar.style.width = '0%';
-        elements.progressBar.classList.remove('warning');
-        elements.timerDisplay.textContent = '0:00';
-
-        showScreen('home');
+        if (file.type) {
+            if (file.type.indexOf('mp4') !== -1) return 'mp4';
+            if (file.type.indexOf('quicktime') !== -1) return 'mov';
+            if (file.type.indexOf('webm') !== -1) return 'webm';
+        }
+        return 'mov'; // default for iOS
     }
 
     // ===========================================
     // EVENT LISTENERS
     // ===========================================
-    elements.btnStart.addEventListener('click', async () => {
-        elements.btnStart.disabled = true;
-        const cameraOk = await startCamera();
-        elements.btnStart.disabled = false;
 
-        if (cameraOk) {
-            startCountdown();
-        }
-    });
+    // Video capture from native camera
+    videoCapture.addEventListener('change', handleVideoCapture);
 
-    elements.btnFinish.addEventListener('click', () => {
-        stopRecording();
-    });
-
-    elements.btnSave.addEventListener('click', () => {
-        // Pause playback
-        elements.videoPlayback.pause();
+    // Save button
+    btnSave.addEventListener('click', function () {
         saveVideo();
     });
 
-    elements.btnRetry.addEventListener('click', async () => {
-        // Clean up
-        elements.videoPlayback.src = '';
-        recordedChunks = [];
-        recordedBlob = null;
+    // Retry button
+    btnRetry.addEventListener('click', function () {
+        cleanup();
+        videoCapture.value = '';
+        showScreen('home');
+    });
 
-        const cameraOk = await startCamera();
-        if (cameraOk) {
-            startCountdown();
-        } else {
-            resetToHome();
-        }
+    // Error screen home button
+    btnErrorHome.addEventListener('click', function () {
+        resetToHome();
     });
 
     // ===========================================
-    // INITIALIZATION
+    // INIT
     // ===========================================
     showScreen('home');
 
